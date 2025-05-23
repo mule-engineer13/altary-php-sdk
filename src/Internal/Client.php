@@ -28,6 +28,8 @@ class Client {
         $this->logLevels = $levels;
     }
 
+
+
 		public function send(array $data): void
 		{
 				$json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
