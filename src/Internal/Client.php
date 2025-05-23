@@ -1,6 +1,7 @@
 <?php
 namespace Altary\Internal;
 
+
 use GuzzleHttp\Client as Guzzle;
 
 class Client {
