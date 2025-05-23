@@ -28,26 +28,33 @@ class Client {
         $this->logLevels = $levels;
     }
 
-    public function send(array $data): void
+		public function send(array $data): void
 		{
-				$json = json_encode($data, JSON_UNESCAPED_UNICODE);
+				$json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 				$headers = [
 						'Content-Type: application/json',
+						'Accept: application/json',
 						'Authorization: Bearer ' . $this->apiKey,
 				];
 
 				$ch = curl_init($this->endpoint);
-				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-				curl_setopt($ch, CURLOPT_POST, true);
-				curl_setopt($ch, CURLOPT_POSTFIELDS, $json);
-				curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);           // 結果を返す
+				curl_setopt($ch, CURLOPT_POST, true);                     // POSTリクエスト
+				curl_setopt($ch, CURLOPT_POSTFIELDS, $json);              // JSONデータ
+				curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);           // ヘッダー指定
+				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);           // リダイレクトを追う
+				curl_setopt($ch, CURLOPT_MAXREDIRS, 5);                    // 最大リダイレクト数
+				curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);             // 接続タイムアウト
+				curl_setopt($ch, CURLOPT_TIMEOUT, 15);                    // 実行タイムアウト
 
+				// レスポンス取得
 				$response = curl_exec($ch);
 				$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 				$curlError = curl_error($ch);
+
 				curl_close($ch);
 
-				// 🔍 ログ出力
+				// デバッグログ出力（CakePHP logs/error.log に記録される）
 				error_log("[Altary SDK] POST to: " . $this->endpoint);
 				error_log("[Altary SDK] Payload: " . $json);
 				error_log("[Altary SDK] HTTP Status: " . $httpCode);
@@ -56,7 +63,13 @@ class Client {
 				} else {
 						error_log("[Altary SDK] Response: " . $response);
 				}
+
+				// HTTPコードが200以外の場合にエラーログ追加
+				if ($httpCode >= 300) {
+						error_log("[Altary SDK] ERROR: Unexpected HTTP status code received: $httpCode");
+				}
 		}
+
 
     public function flush(): void {
         if (empty($this->batch)) return;
