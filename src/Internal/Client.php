@@ -28,18 +28,35 @@ class Client {
         $this->logLevels = $levels;
     }
 
-    public function send(array $data): void {
-        if (!in_array($data['type'] ?? 'error', $this->logLevels)) return;
+    public function send(array $data): void
+		{
+				$json = json_encode($data, JSON_UNESCAPED_UNICODE);
+				$headers = [
+						'Content-Type: application/json',
+						'Authorization: Bearer ' . $this->apiKey,
+				];
 
-        $data['user'] = $this->userContext;
-        $data['environment'] = $this->getEnvironmentInfo();
-        $data['file_content'] = $this->getFileContentSafe($data['file'] ?? null);
+				$ch = curl_init($this->endpoint);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_POST, true);
+				curl_setopt($ch, CURLOPT_POSTFIELDS, $json);
+				curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-        $this->batch[] = $data;
-        if (count($this->batch) >= $this->batchSize) {
-            $this->flush();
-        }
-    }
+				$response = curl_exec($ch);
+				$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+				$curlError = curl_error($ch);
+				curl_close($ch);
+
+				// 🔍 ログ出力
+				error_log("[Altary SDK] POST to: " . $this->endpoint);
+				error_log("[Altary SDK] Payload: " . $json);
+				error_log("[Altary SDK] HTTP Status: " . $httpCode);
+				if ($curlError) {
+						error_log("[Altary SDK] cURL ERROR: " . $curlError);
+				} else {
+						error_log("[Altary SDK] Response: " . $response);
+				}
+		}
 
     public function flush(): void {
         if (empty($this->batch)) return;
