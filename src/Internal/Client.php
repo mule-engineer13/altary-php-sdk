@@ -14,7 +14,7 @@ class Client {
     private array $batch = [];
     private int $batchSize = 5;
 
-    public function __construct(string $apiKey, string $endpoint = 'https://altary.web-ts.dev/errors') {
+    public function __construct(string $apiKey, string $endpoint = 'https://altary.web-ts.dev/cards/errors') {
         $this->apiKey = $apiKey;
         $this->endpoint = $endpoint;
         $this->http = new Guzzle();
