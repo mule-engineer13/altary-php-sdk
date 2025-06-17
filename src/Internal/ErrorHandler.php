@@ -1,45 +1,74 @@
 <?php
 namespace Altary\Internal;
 
-class ErrorHandler {
+require_once __DIR__ . '/Client.php';
+
+/**
+ * Error/Exception ハンドラ
+ * WordPress 版と同じ仕様で JST タイムスタンプ・Deprecated まで送信
+ */
+class ErrorHandler
+{
+    /** @var Client */
     private Client $client;
 
-    public function __construct(Client $client) {
-        $this->client = $client;
+    public function __construct(?Client $client = null)
+    {
+        // DI 未使用の場合は fromEnv() で自動生成
+        $this->client = $client ?? Client::fromEnv();
     }
 
-    public function register(): void {
-        set_exception_handler([$this, 'handleException']);
-        set_error_handler([$this, 'handleError']);
+    /**
+     * エラーハンドラ・例外ハンドラ・shutdown フックを登録
+     * 他プラグイン・アプリに上書きされるのを防ぐため、必要なら再実行推奨
+     */
+    public function register(): void
+    {
+        // 致命的エラー時にバッファを flush
         register_shutdown_function([$this->client, 'flush']);
+
+        // 通常 PHP エラー（Deprecated も含める）
+        set_error_handler([$this, 'handleError'], E_ALL);
+
+        // 例外ハンドラ
+        set_exception_handler([$this, 'handleException']);
     }
 
-    public function handleException(\Throwable $e): void {
-        $file = $e->getFile();
-        $this->client->send([
-            'type' => 'exception',
-            'message' => $e->getMessage(),
-            'file' => $file,
-            'line' => $e->getLine(),
-            'trace' => $e->getTraceAsString(),
-            'file_content' => $this->getSafeFileContent($file),
-        ]);
-    }
+    /**
+     * PHP エラーハンドラ
+     * @return bool true で PHP デフォルト処理を停止
+     */
+    public function handleError(int $errno, string $errstr, string $errfile, int $errline): bool
+    {
+        // error_reporting がフィルタしている場合は無視
+        if (!(error_reporting() & $errno)) {
+            return false;
+        }
 
-    public function handleError(int $errno, string $errstr, string $file, int $line): void {
         $this->client->send([
-            'type' => 'error',
-            'errno' => $errno,
+            'type'    => 'error',
+            'errno'   => $errno,
             'message' => $errstr,
-            'file' => $file,
-            'line' => $line,
-            'file_content' => $this->getSafeFileContent($file),
+            'file'    => $errfile,
+            'line'    => $errline,
+            'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
         ]);
+        return true; // PHP デフォルトのハンドリングを無効化
     }
 
-    private function getSafeFileContent(string $filePath): ?string {
-        if (!is_readable($filePath)) return null;
-        if (filesize($filePath) > 512 * 1024) return '[[File too large]]';
-        return file_get_contents($filePath);
+    /**
+     * 未捕捉例外ハンドラ
+     */
+    public function handleException(\Throwable $e): void
+    {
+        $this->client->send([
+            'type'    => 'exception',
+            'message' => $e->getMessage(),
+            'file'    => $e->getFile(),
+            'line'    => $e->getLine(),
+            'trace'   => $e->getTraceAsString(),
+            'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
+        ]);
     }
 }
+
