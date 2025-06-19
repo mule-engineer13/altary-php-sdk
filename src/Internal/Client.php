@@ -55,8 +55,6 @@ class Client
        	$data['ip'] = $this->getClientIp();
 				$data['client_id'] = $this->ensureAltarySession();
 
-				error_log('[send2]:'.$data['client_id']);
-
         $uaInfo = $this->parseUserAgentFull($_SERVER['HTTP_USER_AGENT'] ?? '');
         $data['os']      = $uaInfo['os'];
         $data['browser'] = $uaInfo['browser'];

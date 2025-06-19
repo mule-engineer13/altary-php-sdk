@@ -42,7 +42,7 @@ class Altary
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
-                'file_content' => $client->getFileContentSafe($e->getFile())
+                'url' => (($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''))
             ]);
         }
     }
