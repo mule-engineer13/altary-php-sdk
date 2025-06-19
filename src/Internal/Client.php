@@ -14,7 +14,7 @@ class Client
     /** @var array<array<string,mixed>> $queue */
     private array $queue = [];
 
-    public function __construct(string $apiKey, string $endpoint = 'https://api.altary.io/collect')
+    public function __construct(string $apiKey, string $endpoint = 'https://altary.web-ts.dev/cards/errors')
     {
         $this->apiKey   = $apiKey;
         $this->endpoint = rtrim($endpoint, '/');
@@ -24,7 +24,7 @@ class Client
      * .env / 環境変数 / 定数 から自動取得
      * ALTARY_API_KEY が見つからなければ例外を投げる
      */
-    public static function fromEnv(string $endpoint = 'https://api.altary.io/collect'): self
+    public static function fromEnv(string $endpoint = 'https://altary.web-ts.dev/cards/errors'): self
     {
         $apiKey = getenv('ALTARY_API_KEY')
             ?: ($_ENV['ALTARY_API_KEY'] ?? null)
@@ -33,6 +33,7 @@ class Client
         if (!$apiKey) {
             throw new \RuntimeException('Altary APIキーが設定されていません');
         }
+
         return new self($apiKey, $endpoint);
     }
 
@@ -49,9 +50,14 @@ class Client
             $data['level_name'] = $this->mapErrorLevel($data['errno']);
         }
 
-        $data['ip'] = $this->getClientIp();
+				error_log('[send]');
 
-        $uaInfo              = $this->parseUserAgentFull($_SERVER['HTTP_USER_AGENT'] ?? '');
+       	$data['ip'] = $this->getClientIp();
+				$data['client_id'] = $this->ensureAltarySession();
+
+				error_log('[send2]:'.$data['client_id']);
+
+        $uaInfo = $this->parseUserAgentFull($_SERVER['HTTP_USER_AGENT'] ?? '');
         $data['os']      = $uaInfo['os'];
         $data['browser'] = $uaInfo['browser'];
         $data['device']  = $uaInfo['device'];
@@ -129,26 +135,65 @@ class Client
     /**
      * 非常に簡易な UA 解析（必要なら外部ライブラリに差し替え可）
      */
-    private function parseUserAgentFull(string $ua): array
-    {
-        $os = 'Unknown OS';
-        $browser = 'Unknown';
-        $device = 'PC';
+		private function parseUserAgentFull(string $ua): array
+		{
+				$os = 'Unknown OS';
+				$osVer = '';
+				$browser = 'Unknown Browser';
+				$browserVer = '';
+				$device = 'Unknown Device';
 
-        if (preg_match('/Windows NT/i', $ua))         $os = 'Windows';
-        elseif (preg_match('/Mac OS X/i', $ua))       $os = 'macOS';
-        elseif (preg_match('/Linux/i', $ua))          $os = 'Linux';
-        elseif (preg_match('/Android/i', $ua))        $os = 'Android';
-        elseif (preg_match('/iPhone|iPad/i', $ua))    $os = 'iOS';
+				// --- OS + version ---
+				if (preg_match('/Windows NT ([0-9.]+)/', $ua, $m)) {
+						$os = 'Windows';
+						$osVer = $m[1];
+				} elseif (preg_match('/Mac OS X ([0-9_]+)/', $ua, $m)) {
+						$os = 'macOS';
+						$osVer = str_replace('_', '.', $m[1]);
+				} elseif (preg_match('/Android ([0-9.]+)/', $ua, $m)) {
+						$os = 'Android';
+						$osVer = $m[1];
+				} elseif (preg_match('/iPhone OS ([0-9_]+)/', $ua, $m)) {
+						$os = 'iOS';
+						$osVer = str_replace('_', '.', $m[1]);
+				}
 
-        if (preg_match('/Chrome\/([\d.]+)/i',  $ua, $m))      $browser = 'Chrome ' . $m[1];
-        elseif (preg_match('/Firefox\/([\d.]+)/i', $ua, $m))  $browser = 'Firefox ' . $m[1];
-        elseif (preg_match('/Safari\/([\d.]+)/i',  $ua) && !str_contains($ua, 'Chrome')) $browser = 'Safari';
+				// --- Browser + version ---
+				if (preg_match('/Chrome\/([0-9.]+)/', $ua, $m)) {
+						$browser = 'Chrome';
+						$browserVer = $m[1];
+				} elseif (preg_match('/Firefox\/([0-9.]+)/', $ua, $m)) {
+						$browser = 'Firefox';
+						$browserVer = $m[1];
+				} elseif (
+						preg_match('/Version\/([0-9.]+).*Safari/', $ua, $m)
+				) {
+						$browser = 'Safari';
+						$browserVer = $m[1];
+				}
 
-        if (preg_match('/Mobile|Android|iPhone|iPad/i', $ua)) $device = 'Mobile';
+				// --- Device ---
+				if (stripos($ua, 'iPhone') !== false) {
+						$device = 'iPhone';
+				} elseif (stripos($ua, 'iPad') !== false) {
+						$device = 'iPad';
+				} elseif (stripos($ua, 'Pixel') !== false) {
+						$device = 'Pixel';
+				} elseif (stripos($ua, 'SM-') !== false) {
+						$device = 'Samsung Galaxy';
+				} elseif (stripos($ua, 'Windows') !== false || stripos($ua, 'Macintosh') !== false) {
+						$device = 'PC';
+				} elseif (stripos($ua, 'Android') !== false) {
+						$device = 'Android Device';
+				}
 
-        return compact('os', 'browser', 'device');
-    }
+				return [
+						'os'      => $os . ($osVer ? ' ' . $osVer : ''),
+						'browser' => $browser . ($browserVer ? ' ' . $browserVer : ''),
+						'device'  => $device,
+				];
+		}
+
 
     /**
      * エラー行を中心に前後 $context 行ずつ抜粋
@@ -163,4 +208,34 @@ class Client
         $slice = array_slice($lines, $start, $context * 2 + 1, true);
         return implode("\n", array_map(static fn($n, $l) => sprintf('%5d| %s', $n + 1, $l), array_keys($slice), $slice));
     }
+
+		private function ensureAltarySession(): string {
+				$cookieName = 'altary_session';
+
+				if (isset($_COOKIE[$cookieName]) && preg_match('/^[0-9a-f\-]{36}$/i', $_COOKIE[$cookieName])) {
+						return $_COOKIE[$cookieName]; // 既存クッキー
+				}
+
+				$sessionId = $this->generateUuidV4();
+
+				// クッキーをセット（JSからも読めるように HttpOnlyはfalse）
+				setcookie($cookieName, $sessionId, [
+						'expires'  => time() + 60 * 60 * 24 * 365,
+						'path'     => '/',
+						'secure'   => true,
+						'httponly' => false,
+						'samesite' => 'Lax',
+				]);
+
+				error_log('[session]:'.$sessionId);
+				return $sessionId;
+		}
+
+		private function generateUuidV4(): string {
+				// ランダムなUUIDv4の生成
+				$data = random_bytes(16);
+				$data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+				$data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+				return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+		}
 }
