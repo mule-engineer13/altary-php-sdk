@@ -27,8 +27,7 @@ class Altary
             $client->setLogLevels($options['log_levels']);
         }
 
-        $handler = new ErrorHandler($client);
-        $handler->register();
+        ErrorHandler::registerOnce($client);
 
         AltaryRegistry::setClient($client);
     }

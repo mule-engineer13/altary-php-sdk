@@ -12,10 +12,42 @@ class ErrorHandler
     /** @var Client */
     private Client $client;
 
+    /** @var ErrorHandler|null */
+    private static ?ErrorHandler $instance = null;
+
+    /** @var bool */
+    private bool $isErrorHandlerRegistered = false;
+
+    /** @var bool */
+    private bool $isExceptionHandlerRegistered = false;
+
+    /** @var callable|null */
+    private $previousErrorHandler = null;
+
+    /** @var callable|null */
+    private $previousExceptionHandler = null;
+
     public function __construct(?Client $client = null)
     {
         // DI 未使用の場合は fromEnv() で自動生成
         $this->client = $client ?? Client::fromEnv();
+    }
+
+    /**
+     * Singleton パターンでエラーハンドラを登録（重複登録を防ぐ）
+     */
+    public static function registerOnce(?Client $client = null): self
+    {
+        if (self::$instance === null) {
+            self::$instance = new self($client);
+        }
+
+        if (self::$instance->isErrorHandlerRegistered && self::$instance->isExceptionHandlerRegistered) {
+            return self::$instance;
+        }
+
+        self::$instance->register();
+        return self::$instance;
     }
 
     /**
@@ -28,10 +60,46 @@ class ErrorHandler
         register_shutdown_function([$this->client, 'flush']);
 
         // 通常 PHP エラー（Deprecated も含める）
-        set_error_handler([$this, 'handleError'], E_ALL);
+        $this->registerErrorHandler();
 
         // 例外ハンドラ
-        set_exception_handler([$this, 'handleException']);
+        $this->registerExceptionHandler();
+    }
+
+    /**
+     * エラーハンドラの登録（既存ハンドラとの連携とPHP bug対応）
+     */
+    private function registerErrorHandler(): void
+    {
+        if ($this->isErrorHandlerRegistered) {
+            return;
+        }
+
+        $errorHandlerCallback = \Closure::fromCallable([$this, 'handleError']);
+
+        $this->isErrorHandlerRegistered = true;
+        $this->previousErrorHandler = set_error_handler($errorHandlerCallback);
+
+        // PHP bug #63206 対応
+        // 最初のハンドラでない場合、E_ALLを指定するとバグが発生する可能性があるため
+        // 一度リストアしてから再登録する
+        if ($this->previousErrorHandler === null) {
+            restore_error_handler();
+            set_error_handler($errorHandlerCallback, E_ALL);
+        }
+    }
+
+    /**
+     * 例外ハンドラの登録（既存ハンドラとの連携）
+     */
+    private function registerExceptionHandler(): void
+    {
+        if ($this->isExceptionHandlerRegistered) {
+            return;
+        }
+
+        $this->isExceptionHandlerRegistered = true;
+        $this->previousExceptionHandler = set_exception_handler([$this, 'handleException']);
     }
 
     /**
@@ -45,6 +113,7 @@ class ErrorHandler
             return false;
         }
 
+        // Altary にエラーを送信
         $this->client->send([
             'type'    => 'error',
             'errno'   => $errno,
@@ -53,7 +122,13 @@ class ErrorHandler
             'line'    => $errline,
             'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
         ]);
-        return true; // PHP デフォルトのハンドリングを無効化
+
+        // 既存のエラーハンドラがあれば呼び出す
+        if ($this->previousErrorHandler !== null && is_callable($this->previousErrorHandler)) {
+            return call_user_func($this->previousErrorHandler, $errno, $errstr, $errfile, $errline);
+        }
+
+        return false; // PHP デフォルトのハンドリングを継続
     }
 
     /**
@@ -61,6 +136,7 @@ class ErrorHandler
      */
     public function handleException(\Throwable $e): void
     {
+        // Altary に例外を送信
         $this->client->send([
             'type'    => 'exception',
             'message' => $e->getMessage(),
@@ -69,6 +145,11 @@ class ErrorHandler
             'trace'   => $e->getTraceAsString(),
             'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
         ]);
+
+        // 既存の例外ハンドラがあれば呼び出す
+        if ($this->previousExceptionHandler !== null && is_callable($this->previousExceptionHandler)) {
+            call_user_func($this->previousExceptionHandler, $e);
+        }
     }
 }
 
