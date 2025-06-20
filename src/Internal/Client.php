@@ -14,6 +14,9 @@ class Client
     /** @var array<array<string,mixed>> $queue */
     private array $queue = [];
 
+    /** @var callable|null $preSendCallback */
+    private $preSendCallback = null;
+
     public function __construct(string $apiKey, string $endpoint = 'https://altary.web-ts.dev/cards/errors')
     {
         $this->apiKey   = $apiKey;
@@ -35,6 +38,17 @@ class Client
         }
 
         return new self($apiKey, $endpoint);
+    }
+
+    /**
+     * preSend コールバックを設定
+     * エラー送信前にデータをフィルタリング・変更できる
+     * 
+     * @param callable $callback function(array $data, array $hint): array|null
+     */
+    public function setPreSendCallback(callable $callback): void
+    {
+        $this->preSendCallback = $callback;
     }
 
     /**
@@ -62,6 +76,26 @@ class Client
 
         if (isset($data['file'], $data['line']) && is_readable($data['file'])) {
             $data['file_excerpt'] = $this->getFileExcerpt($data['file'], (int)$data['line']);
+        }
+
+        // preSend コールバックが設定されている場合は実行
+        if ($this->preSendCallback !== null) {
+            $hint = [
+                'originalException' => $data['originalException'] ?? null,
+                'type' => $data['type'] ?? null,
+            ];
+            
+            $result = call_user_func($this->preSendCallback, $data, $hint);
+            
+            // null が返された場合は送信をスキップ
+            if ($result === null) {
+                return;
+            }
+            
+            // 配列が返された場合はデータを更新
+            if (is_array($result)) {
+                $data = $result;
+            }
         }
 
         $this->queue[] = $data;

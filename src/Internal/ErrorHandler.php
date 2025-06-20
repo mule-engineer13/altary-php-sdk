@@ -121,6 +121,7 @@ class ErrorHandler
             'file'    => $errfile,
             'line'    => $errline,
             'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
+            'originalException' => null, // PHPエラーの場合はnull
         ]);
 
         // 既存のエラーハンドラがあれば呼び出す
@@ -144,6 +145,7 @@ class ErrorHandler
             'line'    => $e->getLine(),
             'trace'   => $e->getTraceAsString(),
             'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
+            'originalException' => $e, // 例外オブジェクト自体を渡す
         ]);
 
         // 既存の例外ハンドラがあれば呼び出す

@@ -17,6 +17,10 @@ function init(array $options = []): void {
 
     $client = new Client($apiKey);
 
+    if (isset($options['preSend']) && is_callable($options['preSend'])) {
+        $client->setPreSendCallback($options['preSend']);
+    }
+
     $handler = new ErrorHandler($client);
     $handler->register();
 
