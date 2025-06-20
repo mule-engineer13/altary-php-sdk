@@ -27,8 +27,12 @@ class Altary
             $client->setLogLevels($options['log_levels']);
         }
 
-        if (isset($options['preSend']) && is_callable($options['preSend'])) {
-            $client->setPreSendCallback($options['preSend']);
+        if (isset($options['pre_send']) && is_callable($options['pre_send'])) {
+            $client->setPreSendCallback($options['pre_send']);
+        }
+
+        if (isset($options['type_of_errors'])) {
+            $client->setAllowedErrorTypes($options['type_of_errors']);
         }
 
         ErrorHandler::registerOnce($client);

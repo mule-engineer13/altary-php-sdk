@@ -17,6 +17,9 @@ class Client
     /** @var callable|null $preSendCallback */
     private $preSendCallback = null;
 
+    /** @var array|string|null $allowedErrorTypes */
+    private $allowedErrorTypes = null;
+
     public function __construct(string $apiKey, string $endpoint = 'https://altary.web-ts.dev/cards/errors')
     {
         $this->apiKey   = $apiKey;
@@ -52,6 +55,22 @@ class Client
     }
 
     /**
+     * 送信するエラーの種類を制限
+     * 
+     * @param array|string $types 'error', 'exception', ['error', 'exception'] など
+     */
+    public function setAllowedErrorTypes($types): void
+    {
+        if (is_string($types)) {
+            $this->allowedErrorTypes = [$types];
+        } elseif (is_array($types)) {
+            $this->allowedErrorTypes = $types;
+        } else {
+            $this->allowedErrorTypes = null;
+        }
+    }
+
+    /**
      * ログを即時送信 or キューに追加して flush() でまとめ送信
      * テールコール用途にも対応するため、ここではキューへ push
      */
@@ -76,6 +95,14 @@ class Client
 
         if (isset($data['file'], $data['line']) && is_readable($data['file'])) {
             $data['file_excerpt'] = $this->getFileExcerpt($data['file'], (int)$data['line']);
+        }
+
+        // エラータイプフィルタリング
+        if ($this->allowedErrorTypes !== null) {
+            $errorType = $data['type'] ?? 'unknown';
+            if (!in_array($errorType, $this->allowedErrorTypes, true)) {
+                return; // 許可されていないエラータイプは送信しない
+            }
         }
 
         // preSend コールバックが設定されている場合は実行
