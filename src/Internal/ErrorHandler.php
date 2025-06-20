@@ -56,8 +56,8 @@ class ErrorHandler
      */
     public function register(): void
     {
-        // 致命的エラー時にバッファを flush
-        register_shutdown_function([$this->client, 'flush']);
+        // 致命的エラー時にFatal Errorを捕捉してからバッファを flush
+        register_shutdown_function([$this, 'handleShutdown']);
 
         // 通常 PHP エラー（Deprecated も含める）
         $this->registerErrorHandler();
@@ -152,6 +152,36 @@ class ErrorHandler
         if ($this->previousExceptionHandler !== null && is_callable($this->previousExceptionHandler)) {
             call_user_func($this->previousExceptionHandler, $e);
         }
+    }
+
+    /**
+     * shutdown 時のFatal Error捕捉
+     */
+    public function handleShutdown(): void
+    {
+        $error = error_get_last();
+        
+        error_log("[Shutdown] error_get_last: " . json_encode($error));
+        
+        // Fatal Error, Parse Error, Compile Error を捕捉
+        if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_COMPILE_ERROR, E_CORE_ERROR], true)) {
+            error_log("[Shutdown] Sending fatal error: " . $error['message']);
+            $this->client->send([
+                'type'    => 'error',
+                'errno'   => $error['type'],
+                'message' => $error['message'],
+                'file'    => $error['file'],
+                'line'    => $error['line'],
+                'url'     => ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? ''),
+                'originalException' => null,
+            ]);
+        } else {
+            error_log("[Shutdown] No fatal error to send");
+        }
+        
+        // バッファを flush
+        error_log("[Shutdown] Flushing client");
+        $this->client->flush();
     }
 }
 

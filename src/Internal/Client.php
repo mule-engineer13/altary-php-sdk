@@ -24,6 +24,9 @@ class Client
     {
         $this->apiKey   = $apiKey;
         $this->endpoint = rtrim($endpoint, '/');
+        
+        // デフォルトで全てのエラータイプを送信
+        $this->allowedErrorTypes = 'all';
     }
 
     /**
@@ -57,16 +60,20 @@ class Client
     /**
      * 送信するエラーの種類を制限
      * 
-     * @param array|string $types 'error', 'exception', ['error', 'exception'] など
+     * @param array|string $types 'error', 'warning', 'notice', 'exception', 'all' など
      */
     public function setAllowedErrorTypes($types): void
     {
         if (is_string($types)) {
-            $this->allowedErrorTypes = [$types];
+            if ($types === 'all') {
+                $this->allowedErrorTypes = 'all';
+            } else {
+                $this->allowedErrorTypes = [$types];
+            }
         } elseif (is_array($types)) {
             $this->allowedErrorTypes = $types;
         } else {
-            $this->allowedErrorTypes = null;
+            $this->allowedErrorTypes = 'all';  // デフォルトは全て送信
         }
     }
 
@@ -81,6 +88,37 @@ class Client
 
         if (isset($data['errno'])) {
             $data['level_name'] = $this->mapErrorLevel($data['errno']);
+        } elseif ($data['type'] === 'exception') {
+            // 例外の場合もlevel_nameを設定
+            $originalException = $data['originalException'] ?? null;
+            if ($originalException instanceof \Error) {
+                $data['level_name'] = 'error';  // Fatal Error相当
+            } else {
+                $data['level_name'] = 'exception';  // 通常の例外
+            }
+        }
+
+        // エラータイプフィルタリング（level_name設定後に実行）
+        if ($this->allowedErrorTypes !== 'all') {
+            $errorType = $data['type'] ?? 'unknown';
+            $levelName = $data['level_name'] ?? null;
+            
+            $originalException = $data['originalException'] ?? null;
+            $exceptionType = $originalException ? get_class($originalException) : 'null';
+            error_log("[Filter] errorType: $errorType, levelName: $levelName, exceptionType: $exceptionType, allowed: " . json_encode($this->allowedErrorTypes));
+            
+            // level_name ベースでフィルタリング（DBに登録される値と同じ）
+            $allowedTypes = $this->allowedErrorTypes;
+            $isAllowed = $levelName ? in_array($levelName, $allowedTypes, true) : false;
+            
+            error_log("[Filter] isAllowed: " . ($isAllowed ? 'true' : 'false'));
+            
+            if (!$isAllowed) {
+                error_log("[Filter] Skipping send - not allowed");
+                return; // 許可されていないエラータイプは送信しない
+            }
+        } else {
+            error_log("[Filter] type_of_errors='all' - sending all errors");
         }
 
 				error_log('[send]');
@@ -95,14 +133,6 @@ class Client
 
         if (isset($data['file'], $data['line']) && is_readable($data['file'])) {
             $data['file_excerpt'] = $this->getFileExcerpt($data['file'], (int)$data['line']);
-        }
-
-        // エラータイプフィルタリング
-        if ($this->allowedErrorTypes !== null) {
-            $errorType = $data['type'] ?? 'unknown';
-            if (!in_array($errorType, $this->allowedErrorTypes, true)) {
-                return; // 許可されていないエラータイプは送信しない
-            }
         }
 
         // preSend コールバックが設定されている場合は実行
